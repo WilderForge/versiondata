@@ -1,0 +1,141 @@
+plugins {
+    id 'java-library'
+    id 'maven-publish'
+    id 'eclipse'
+    id 'idea'
+}
+
+def blobsDir = file('src/main/resources/Wildermyth')
+def repoDir = file("$buildDir/repo")
+
+def publicationsData = []
+
+blobsDir.eachDir { osDir ->
+    osDir.eachDir { versionDir ->
+        def blobsFile = new File(versionDir, 'blobs.json')
+        if (blobsFile.exists()) {
+            def os = osDir.name
+            def versionName = versionDir.name
+            def safeVersion = versionName.replace('+', '-') + "-SNAPSHOT"
+            def artifactId = "${os.toLowerCase()}.metadata"
+            def groupId = "com.wildermods.wildermyth"
+            def jarTaskName = "jar_${os}_${safeVersion}"
+            def outputDir = file("$buildDir/jars/${os}/${safeVersion}")
+
+            // Create unique JAR task
+            def jarTask = tasks.register(jarTaskName, Jar) {
+                archiveBaseName.set("${artifactId}-${os.toLowerCase()}")
+                archiveVersion.set(safeVersion + "-SNAPSHOT")
+                destinationDirectory.set(outputDir)
+
+                def resourcePath = "Wildermyth/${os}/${versionName}"
+                from(blobsFile) {
+                    into(resourcePath)
+                }
+            }
+
+            publicationsData << [
+                groupId : groupId,
+                version : safeVersion,
+                jarTask : jarTask,
+                artifactId : artifactId
+            ]
+        }
+    }
+}
+
+
+// Read and normalize version argument
+def versionParam = project.hasProperty('version') ? project.property('version') : null
+
+tasks.register('publishVersion') {
+    group = 'publishing'
+    description = 'Publish only a specific version using -Pversion=...'
+
+    if (!versionParam) {
+        throw new GradleException("You must specify -Pversion=...")
+    }
+
+    def matched = []
+
+    publicationsData.each { entry ->
+        def originalVersion = entry.version.replace('-', '+') // unsanitize
+        if (originalVersion == versionParam) {
+            def pubName = "${entry.jarTask.name}_pub"
+            def publishTaskName = "publish${pubName.capitalize()}PublicationToMavenLocal"
+            println "Will publish ${entry.groupId}:version-blobs:${entry.version}"
+            dependsOn tasks.named(publishTaskName)
+            matched << publishTaskName
+        }
+    }
+
+    if (matched.isEmpty()) {
+        throw new GradleException("No blobs found for version: $versionParam")
+    }
+}
+
+tasks.register("cleanupAfterPublishing") {
+    group = "cleanup"
+    description = "Deletes temporary build artifacts after all publishing"
+
+    doLast {
+        def dirsToDelete = [
+            file("$buildDir/jars"),
+            file("$buildDir/publications"),
+            file("$buildDir/tmp")
+        ]
+
+        dirsToDelete.each { dir ->
+            if (dir.exists()) {
+                println "Deleting ${dir}"
+                dir.deleteDir()
+            }
+        }
+    }
+}
+
+//cleanup run after success
+gradle.buildFinished { result ->
+    if (result.failure == null) {
+        println "Build was successful — cleaning up..."
+
+        // Manually delete the directories here
+        def dirsToDelete = [
+            file("$buildDir/jars"),
+            file("$buildDir/publications"),
+            file("$buildDir/tmp")
+        ]
+
+        dirsToDelete.each { dir ->
+            if (dir.exists()) {
+                println "Deleting ${dir}"
+                dir.deleteDir()
+            }
+        }
+    } else {
+        println "Build failed — skipping cleanup"
+    }
+}
+
+publishing {
+    publications {
+        publicationsData.each { entry ->
+            def jarTask = entry.jarTask.get()
+            def pubName = "${jarTask.name}_pub"
+
+            create(pubName, MavenPublication) {
+                groupId = entry.groupId
+                artifactId = entry.artifactId
+                version = entry.version
+                artifact(jarTask)
+            }
+        }
+    }
+
+    repositories {
+        maven {
+            name = 'local'
+            url = repoDir.toURI()
+        }
+    }
+}
