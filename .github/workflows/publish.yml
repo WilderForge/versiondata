@@ -1,0 +1,40 @@
+name: Publish Specific Commit
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: 'The commit SHA to checkout and build'
+        required: true
+
+permissions:
+  contents: read
+  statuses: write
+
+jobs:
+  publish_commit:
+    runs-on: [self-hosted, linux]
+    steps:
+      - name: Determine Commit SHA
+        id: determine_sha
+        run: |
+          if [ -z "${{ github.event.inputs.sha }}" ]; then
+            echo "COMMIT_SHA=${{ github.sha }}" >> $GITHUB_ENV
+          else
+            echo "COMMIT_SHA=${{ github.event.inputs.sha }}" >> $GITHUB_ENV
+          fi
+      - name: Checkout the repository at SHA
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ env.COMMIT_SHA }}
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4.5.0
+        with:
+          java-version: '21'
+          distribution: 'adopt'
+
+      - name: Publish Data
+        if: ${{ github.event.inputs.publish == 'true' }}
+        run: |
+          echo "Publishing build..."
+          ./gradlew publish -PmavenRepoUrl=${{ secrets.MAVEN_REPO }}
