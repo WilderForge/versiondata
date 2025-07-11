@@ -134,8 +134,7 @@ publishing {
 
     repositories {
         maven {
-            name = 'local'
-            url = repoDir.toURI()
+            url = uri(project.hasProperty('mavenRepoUrl') ? project.mavenRepoUrl : mavenLocalUrl) // Default to mavenLocal if no custom URL is provided
         }
     }
 }
