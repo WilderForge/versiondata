@@ -34,7 +34,6 @@ jobs:
           distribution: 'adopt'
 
       - name: Publish Data
-        if: ${{ github.event.inputs.publish == 'true' }}
         run: |
           echo "Publishing build..."
           ./gradlew publish -PmavenRepoUrl=${{ secrets.MAVEN_REPO }}
